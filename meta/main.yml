@@ -10,9 +10,11 @@ galaxy_info:
       versions:
         - 6
         - 7
-  categories:
+  galaxy_tags:
     - system
-    - service-discovery
+    - hashicorp
+    - keyval
+    - servicediscovery
 
 dependencies:
   - {role: pgporada.repo-epel}
