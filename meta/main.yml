@@ -4,6 +4,7 @@ galaxy_info:
   description: Installs and configures consul
   company: Jive Software
   min_ansible_version: 2.2
+  license: Apache 2.0
   platforms:
     - name: EL
       versions:
