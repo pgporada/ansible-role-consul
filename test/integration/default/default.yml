@@ -1,0 +1,57 @@
+---
+- hosts: localhost
+  gather_facts: true
+
+  vars:
+    httpd_is_behind_loadbalancer: false
+    httpd_vhosts_enabled:
+      - url: consul.pgporada.test
+        enable_ssl_vhost: false
+        aliases: []
+        serveradmin: philporada@gmail.com
+        errorlog: "/var/log/httpd/error_log"
+        accesslog: "/var/log/httpd/access_log"
+        directory: "/var/www/test1"
+        docrootdir: public_html
+        use_default_index_page: true
+        extra_parameters_main: |
+          RewriteEngine On
+        extra_parameters_include: |
+          # Hide git related stuff
+          RewriteRule ^(.*/)?\.git+ - [R=404,L]
+          RewriteRule ^(.*/)?\.gitignore+ - [R=404,L]
+        extra_parameters_include: |
+          #
+          <Location "/">
+              Require ip 216.109.198.154/32
+              Require ip 192.168.33.1/24
+              AuthType Basic
+              AuthName "Restricted"
+              AuthBasicProvider file
+              AuthUserFile "{{ consul_htpasswd_file_path }}"
+              Require valid-user
+          </Location>
+          # CVE-2016-5385, CVE-2016-5387
+          RequestHeader unset Proxy early
+          #
+          # Hide git related stuff
+          RewriteRule ^(.*/)?\.git+ - [R=404,L]
+          RewriteRule ^(.*/)?\.gitignore+ - [R=404,L]
+          #
+          ProxyRequests Off
+          ProxyPreserveHost On
+          ProxyPass        / http://localhost:8500/
+          ProxyPassReverse / http://localhost:8500/
+
+    consul_is_server: true
+    consul_is_ui: true
+    consul_iface: eth1
+    consul_htpasswd_file_path: "/opt/consul/htpasswd.consul"
+    consul_htpasswd_user: test-user
+    consul_htpasswd_pass: "SVNljknfeio45h6tSDFj234590"
+
+  roles:
+    - pgporada.httpd
+    - pgporada.repo-epel
+    - ansible-role-consul
+...

@@ -1,0 +1,12 @@
+---
+# This will set a custom 'consul_servers' fact.
+# This is needed to bootstrap a consul cluster when we don't
+# the IPs of the servers that got started (AWS).
+# ansible_bios_version is just a `dmidecode -s bios-version`
+- include: consul_server_fact.yml
+
+- include: install.yml
+
+- include: dnsmasq.yml
+  when: consul_install_dnsmasq is defined and consul_install_dnsmasq
+...

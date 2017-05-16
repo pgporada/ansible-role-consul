@@ -1,0 +1,18 @@
+---
+galaxy_info:
+  author: Matthew Finlayson, forked by Phil Porada - philporada@gmail.com
+  description: Installs and configures consul
+  company: Jive Software
+  min_ansible_version: 2.2
+  platforms:
+    - name: EL
+      versions:
+        - 6
+        - 7
+  categories:
+    - system
+    - service-discovery
+
+dependencies:
+  - {role: pgporada.repo-epel}
+...

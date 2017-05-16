@@ -1,0 +1,17 @@
+[Unit]
+Description=Consul {{ "Server" if consul_is_server is defined and consul_is_server else "Client" }}
+Requires=network-online.target
+After=network-online.target
+
+[Service]
+Environment="GOMAXPROCS=`nproc`"
+Restart=on-failure
+User={{ consul_user }}
+Group={{ consul_group }}
+# https://github.com/hashicorp/consul/issues/445
+ExecStart=/bin/sh -c '/opt/consul/bin/consul agent -config-dir /etc/consul.d >> /var/log/consul/consul.log 2>&1'
+ExecReload=/bin/kill -HUP $MAINPID
+KillSignal=SIGINT
+
+[Install]
+WantedBy=multi-user.target

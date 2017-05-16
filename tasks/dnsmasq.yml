@@ -1,0 +1,76 @@
+---
+- name: Install dnsmasq
+  become: true
+  become_method: sudo
+  package:
+    name: dnsmasq
+    state: present
+
+- name: ensure configure directory
+  become: true
+  become_method: sudo
+  file:
+    dest: /etc/dnsmasq.d
+    state: directory
+
+- name: ensure dnsmasq configuration
+  become: true
+  become_method: sudo
+  lineinfile:
+    dest: "/etc/dnsmasq.conf"
+    regexp: "^conf-dir="
+    line: "conf-dir=/etc/dnsmasq.d"
+    state: present
+
+- name: configure dnsmasq to listen on interface(s)
+  become: true
+  become_method: sudo
+  lineinfile:
+    regexp: "^interface={{ item }}"
+    line: "interface={{ item }}"
+    dest: /etc/dnsmasq.conf
+  with_items:
+    "{{ consul_dnsmasq.listen_interface }}"
+
+- name: configure dnsmasq to disable DHCP and TFTP
+  become: true
+  become_method: sudo
+  lineinfile:
+    regexp: "^no-dhcp-interface={{ item }}"
+    line: "no-dhcp-interface={{ item }}"
+    dest: /etc/dnsmasq.conf
+  with_items:
+    "{{ consul_dnsmasq.no_dhcp_interface }}"
+
+- name: configure dnsmasq to delegate all Consul DNS requests to the Consul DNS port
+  become: true
+  become_method: sudo
+  copy:
+    content: 'server=/{{ consul_domain }}/127.0.0.1#{{ consul_port_dns }}'
+    dest: /etc/dnsmasq.d/10-consul
+  notify:
+    - Restart dnsmasq
+
+- name: create alternate upstream servers file for dnsmasq
+  become: true
+  become_method: sudo
+  template:
+    src: "{{ consul_dnsmasq_upstream_template }}"
+    dest: /etc/resolv_dnsmasq.conf
+  when: "{{ (consul_dnsmasq.upstream_servers is defined) and consul_dnsmasq.upstream_servers }}"
+  notify:
+    - Restart dnsmasq
+
+- name: configure dnsmasq to use alternate upstream servers file
+  become: true
+  become_method: sudo
+  copy:
+    content: "resolv-file=/etc/resolv_dnsmasq.conf"
+    dest: /etc/dnsmasq.d/20-upstream-servers
+  when: "{{ (consul_dnsmasq.upstream_servers is defined) and consul_dnsmasq.upstream_servers }}"
+  notify:
+    - Restart dnsmasq
+
+- name: Flush all handlers immediately
+  meta: flush_handlers
+...

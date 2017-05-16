@@ -1,0 +1,425 @@
+---
+- name: Install needed helper package(s)
+  become: true
+  become_method: sudo
+  package:
+    name: "{{ item }}"
+    state: present
+  with_items:
+    - unzip
+    - jq
+    - python-demjson
+    - python-passlib
+    - python-pip
+    - bcrypt
+    - libselinux-python
+    - policycoreutils-python
+
+- name: Install pip module(s)
+  pip:
+    name: bcrypt
+    state: present
+
+- name: SELinux booleans
+  become: true
+  become_method: sudo
+  seboolean:
+    name: "{{ item }}"
+    state: yes
+    persistent: yes
+  with_items:
+    - httpd_can_network_connect
+  when: ansible_selinux and ansible_selinux.status != "disabled"
+
+- name: SELinux port re-map
+  become: true
+  become_method: sudo
+  seport:
+    ports: "{{ consul_port_http }}"
+    proto: tcp
+    setype: http_port_t
+    state: present
+  when: ansible_selinux and ansible_selinux.status != "disabled"
+
+- name: Create consul group
+  become: true
+  become_method: sudo
+  group:
+    name: "{{ consul_group }}"
+    state: present
+
+- name: Create consul user
+  become: true
+  become_method: sudo
+  user:
+    home: "/opt/consul"
+    name: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    shell: /sbin/nologin
+    system: yes
+
+- name: Create consul directories
+  become: true
+  become_method: sudo
+  file:
+    state: directory
+    path: "{{ item }}"
+    owner: "{{ consul_user}}"
+    group: "{{ consul_group}}"
+  with_items:
+    - "/opt/consul"
+    - "/opt/consul/bin"
+    - "/opt/consul/cert"
+    - "/opt/consul/data"
+    - "/etc/consul.d"
+
+- name: Fix permissions on /etc/consul.d
+  become: true
+  become_method: sudo
+  file:
+    state: directory
+    path: /etc/consul.d
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0750
+  notify:
+    - Restart consul
+
+- name: Check for previously installed and executable consul
+  shell: "consul version | head -n1 | awk '{print $2}' | awk -F'-' '{print $1}' | sed 's/v//'"
+  changed_when: False
+  failed_when: False
+  register: prior_consul_version
+  tags:
+    - consul
+
+- name: Previous consul version
+  debug:
+    var: prior_consul_version.stdout
+  tags:
+    - consul
+
+- name: Convert architecture fact to what Consul url structure expects - amd64
+  set_fact:
+    override_ansible_userspace_architecture: amd64
+  when: ansible_userspace_architecture == "x86_64"
+
+- name: Set consul_filename var
+  set_fact:
+    consul_filename: "consul_{{ consul_version }}_{{ ansible_system | lower }}_{{ override_ansible_userspace_architecture|default('ansible_userspace_architecture') }}.zip"
+
+- name: Get Consul sha256sums
+  get_url:
+    url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_SHA256SUMS"
+    dest: "/tmp/consul_{{ consul_version }}_SHA256SUMS"
+  when: prior_consul_version.stdout != consul_version
+
+- name: Get Consul sha256sum signatures
+  get_url:
+    url: "https://releases.hashicorp.com/consul/{{ consul_version }}/consul_{{ consul_version }}_SHA256SUMS.sig"
+    dest: "/tmp/consul_{{ consul_version }}_SHA256SUMS.sig"
+  when: prior_consul_version.stdout != consul_version
+
+- name: Import the Hashicorp Security gpg key
+  shell: curl https://keybase.io/hashicorp/key.asc | gpg --import
+  args:
+    warn: False
+  changed_when: False
+  when: prior_consul_version.stdout != consul_version
+
+- name: Verify the signature file is untampered
+  command: "gpg --verify /tmp/consul_{{ consul_version }}_SHA256SUMS.sig /tmp/consul_{{ consul_version }}_SHA256SUMS"
+  register: sha256_check
+  changed_when: False
+  failed_when: '"Good signature from \"HashiCorp Security <security@hashicorp.com>\"" not in sha256_check.stderr'
+  when: prior_consul_version.stdout != consul_version
+
+- name: "Gather signature for {{ consul_filename }}"
+  shell: "grep '{{ consul_filename }}' /tmp/consul_{{ consul_version }}_SHA256SUMS | awk '{print $1}'"
+  changed_when: False
+  register: consul_signature
+  when: prior_consul_version.stdout != consul_version
+
+- name: "Download {{ consul_filename }}"
+  get_url:
+    url: "https://releases.hashicorp.com/consul/{{ consul_version }}/{{ consul_filename }}"
+    dest: "/tmp/{{ consul_filename }}"
+    checksum: "sha256:{{ consul_signature.stdout }}"
+    owner: root
+    group: root
+    mode: 0444
+  when: prior_consul_version.stdout != consul_version
+
+- name: Install Consul from the zip
+  become: true
+  become_method: sudo
+  unarchive:
+    src: "/tmp/consul_{{ consul_version }}_linux_amd64.zip"
+    dest: "/opt/consul/bin"
+    copy: no
+    seuser: system_u
+    serole: object_r
+    setype: bin_t
+    selevel: s0
+  when: prior_consul_version.stdout != consul_version
+  notify:
+    - Restart consul
+
+- name: Fix /opt/consul/{bin,data,cert} selinux labels
+  become: true
+  become_method: sudo
+  file:
+    path: "{{ item }}"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0750
+    state: directory
+    seuser: system_u
+    serole: object_r
+    setype: usr_t
+    selevel: s0
+  with_items:
+    - "/opt/consul/bin"
+    - "/opt/consul/cert"
+    - "/opt/consul/data"
+  notify:
+    - Restart consul
+
+- name: Check if old logfile exists to prep for creating /var/log/consul/consul.log. Pre v0.7.1
+  stat:
+    path: /var/log/consul
+  register: old_log_exists
+
+- name: Remove old logfile to prep for creating /var/log/consul/consul.log. Pre v0.7.1
+  become: true
+  become_method: sudo
+  file:
+    path: /var/log/consul
+    state: absent
+  when: >
+    (old_log_exists.stat.exists is defined and old_log_exists.stat.exists)
+    and not old_log_exists.stat.isdir
+
+- name: Ensure consul log dir exists
+  become: true
+  become_method: sudo
+  file:
+    path: "/var/log/consul"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0750
+    state: directory
+    seuser: system_u
+    serole: object_r
+    setype: var_log_t
+    selevel: s0
+  notify:
+    - Restart consul
+
+- name: Touch the log file
+  become: true
+  become_method: sudo
+  file:
+    state: touch
+    path: "/var/log/consul/consul.log"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0640
+    seuser: system_u
+    serole: object_r
+    setype: var_log_t
+    selevel: s0
+  changed_when: false
+
+- name: Add logrotate script
+  become: true
+  become_method: sudo
+  template:
+    src: etc/logrotate.d/consul.j2
+    dest: /etc/logrotate.d/consul
+    owner: root
+    group: root
+    mode: 0644
+  tags:
+    - consul
+
+- name: Add consul to PATH
+  become: true
+  become_method: sudo
+  file:
+    src: /opt/consul/bin/consul
+    dest: /sbin/consul
+    state: link
+
+- name: Create TLS key
+  no_log: True
+  copy:
+    content: "{{ consul_tls_key }}"
+    dest: "{{ consul_key_file }}"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0600
+  when: consul_tls_key is defined
+
+- name: Create TLS cert
+  no_log: True
+  copy:
+    content: "{{ consul_tls_cert }}"
+    dest: "{{ consul_cert_file }}"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0600
+  when: consul_tls_cert is defined
+
+- name: Create TLS root CA cert
+  no_log: True
+  copy:
+    content: "{{ consul_tls_ca_cert }}"
+    dest: "{{ consul_ca_file }}"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0600
+  when: consul_tls_ca_cert is defined
+
+- name: Set ownership
+  become: true
+  become_method: sudo
+  file:
+    state: directory
+    path: "/opt/consul"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    recurse: yes
+
+- name: Copy consul systemd script
+  become: true
+  become_method: sudo
+  template:
+    src: usr/lib/systemd/system/consul.systemd.j2
+    dest: /usr/lib/systemd/system/consul.service
+    owner: root
+    group: root
+    mode: 0644
+  notify:
+    - Reload systemd
+    - Restart consul
+
+- name: Add consul to path through profile.d
+  become: true
+  become_method: sudo
+  template:
+    src: "{{ consul_add_path_template }}"
+    dest: /etc/profile.d/consul.sh
+    owner: root
+    group: root
+    mode: 0755
+
+- name: Copy consulkv script
+  become: true
+  become_method: sudo
+  template:
+    src: "{{ consul_kv_template}}"
+    dest: "/opt/consul/bin/consulkv"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0755
+
+- name: Ensure /etc/consul.d/consul.json config exists
+  become: true
+  become_method: sudo
+  template:
+    src: "etc/consul.d/consul.json.j2"
+    dest: "/etc/consul.d/consul.json"
+    owner: "{{ consul_user }}"
+    group: "{{ consul_group }}"
+    mode: 0640
+  notify:
+    - Restart consul
+
+- name: Lint the consul configuration
+  become: true
+  become_method: sudo
+  command: "jsonlint /etc/consul.d/consul.json"
+  register: jsonlint_result
+  changed_when: false
+  failed_when: "'Warning' in jsonlint_result.stdout or 'warnings' in jsonlint_result.stdout"
+
+- name: Use consul to check the consul configuration
+  become: true
+  become_method: sudo
+  command: "consul configtest -config-file /etc/consul.d/consul.json"
+  changed_when: false
+
+- name: Throw warning message if using the default master ACL token
+  vars:
+    master_acl_token_warning: |
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      WARNING WARNING WARNING WARNING WARNING WA
+      You are using the default master ACL token
+      WARNING WARNING WARNING WARNING WARNING WA
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  debug:
+    msg: "{{ master_acl_token_warning.split('\n') }}"
+  when: "consul_acl_master_token == '78ab5382-6bc9-4bc6-857f-d65f72fe3453'"
+
+- name: Throw warning message if using the default htpasswd
+  vars:
+    default_htpasswd: |
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+      WARNING WARNING WARNING WARNING WARNING WA
+      You are using the default htpasswd pass!!!
+      WARNING WARNING WARNING WARNING WARNING WA
+      %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+  debug:
+    msg: "{{ default_htpasswd.split('\n') }}"
+  when: "consul_htpasswd_pass == 'iOSISDOFIOFH09345kjSDFKLJSFGDLjkh093245' and consul_is_ui is defined and consul_is_ui"
+
+- name: Create consul admin user
+  become: true
+  become_method: sudo
+  htpasswd:
+    state: present
+    path: "{{ consul_htpasswd_file_path }}"
+    name: "{{ consul_htpasswd_user }}"
+    password: "{{ consul_htpasswd_pass }}"
+    crypt_scheme: bcrypt
+    owner: root
+    group: root
+    mode: 0640
+  when: consul_is_ui is defined and consul_is_ui
+
+- name: Add CONSUL_RPC_ADDR to .bashrc
+  lineinfile:
+    dest: "/opt/consul/.bashrc"
+    insertbefore: BOF
+    regexp: '^export CONSUL_RPC_ADDR'
+    line: 'export CONSUL_RPC_ADDR="{{ consul_client_address }}:{{ consul_port_rpc }}"'
+    create: yes
+
+- name: Add CONSUL_RPC_ADDR to root .bashrc
+  become: true
+  become_method: sudo
+  lineinfile:
+    dest: "/root/.bashrc"
+    insertbefore: BOF
+    regexp: '^export CONSUL_RPC_ADDR'
+    line: 'export CONSUL_RPC_ADDR="{{ consul_client_address }}:{{ consul_port_rpc }}"'
+    create: yes
+
+- name: Remove legacy consul configuration
+  become: true
+  become_method: sudo
+  command: "if [ -f /etc/consul.conf ]; then rm -f /etc/consul.conf; fi"
+  changed_when: false
+  ignore_errors: yes
+  notify:
+    - Restart consul
+
+- name: Flush all handlers immediately
+  meta: flush_handlers
+
+- name: Ensure consul is running
+  service:
+    name: consul
+    state: started
+...

@@ -1,0 +1,12 @@
+[Unit]
+Description=Consul Agent Custom SystemD
+
+[Service]
+Environment="GOMAXPROCS=`nproc`"
+Environment="FOO=bar"
+User={{ consul_user }}
+Group={{ consul_group }}
+ExecStart=/opt/consul/bin/consul agent -config-dir /etc/consul.d -config-file=/etc/consul.conf >> {{ consul_log_file }} 2>&1
+
+[Install]
+WantedBy=multi-user.target

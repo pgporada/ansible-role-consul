@@ -1,0 +1,87 @@
+---
+#################
+# We ARE in AWS #
+#################
+- name: AWS check succeed
+  debug:
+    msg: "We are in AWS"
+  when: "'amazon' in ansible_bios_version"
+
+- name: Install pip module(s) for up to date regions
+  pip:
+    name: boto
+    state: latest
+  when: "'amazon' in ansible_bios_version"
+
+- name: Get region that this node is running in
+  ec2_facts:
+  when: "'amazon' in ansible_bios_version"
+
+  # ROLES comes from tags set via Terraform
+- name: Gathering facts from servers with specific AWS tags
+  ec2_remote_facts:
+    region: "{{ ansible_ec2_placement_region }}"
+    filters:
+      instance-state-name: running
+      "tag:ENV": "{{ cli_env }}"
+      "tag:TIER": "{{ cli_tier }}"
+      "tag:ROLES": "*consul-server*"
+  register: consultags
+  when: "'amazon' in ansible_bios_version"
+
+- name: Creating new 'consul_servers_initial' fact based on result of the gathered EC2 tags
+  set_fact:
+    consul_servers_initial: "{{ consultags.instances|map(attribute='private_ip_address')|difference(ansible_all_ipv4_addresses)|list or omit }}"
+  when: "'amazon' in ansible_bios_version"
+
+- name: Build fact when consul_servers_initial is defined
+  set_fact:
+    consul_servers: "\"{{ consul_servers_initial|join('\",\"') }}\""
+    consul_bootstrap_expect: "{{ consul_servers_initial|length }}"
+  when: "'amazon' in ansible_bios_version and consul_servers_initial is defined"
+
+- name: Build fact when consul_servers_initial is undefined
+  set_fact:
+    consul_bootstrap_expect: 1
+    consul_servers:
+  when: "'amazon' in ansible_bios_version and consul_servers_initial is undefined"
+
+- name: Set number of bootstrap servers
+  set_fact:
+  when: "'amazon' in ansible_bios_version"
+
+
+#####################
+# We are NOT in AWS #
+#####################
+- name: AWS check fail
+  debug:
+    msg: "We're not in AWS"
+  when: "'amazon' not in ansible_bios_version"
+
+- name: Generating fact based on hosts in groups['consul_servers']
+  set_fact:
+    consul_servers_initial: "{{ groups[consul_group_name]|default(None)|map('extract', hostvars, ['ansible_eth1','ipv4','address'])|difference(ansible_all_ipv4_addresses)|list or omit }}"
+  when: "'amazon' not in ansible_bios_version"
+
+# If this step is not done, consul_servers_initial will output unicode strings instead of what we need
+# unicode string: u['192.168.1.1'],u['192.168.1.2']
+# what we need: "192.168.1.1","192.168.1.2"
+- name: Build facts when consul_servers_initial is defined
+  set_fact:
+    consul_bootstrap_expect: "{{ consul_servers_initial|length }}"
+    consul_servers: "\"{{ consul_servers_initial|join('\",\"') }}\""
+  when: "'amazon' not in ansible_bios_version and consul_servers_initial is defined"
+
+# Additionally we need to handle when there is only a single node designated
+# as a consul server.
+- name: Build facts when consul_servers_initial is undefined
+  set_fact:
+    consul_bootstrap_expect: 1
+    consul_servers:
+  when: "'amazon' not in ansible_bios_version and consul_servers_initial is undefined"
+
+- name: Outputting the consul_servers available to each machine
+  debug:
+    var: consul_servers
+...

@@ -1,0 +1,98 @@
+---
+# https://www.consul.io/docs/agent/options.html
+
+consul_version: 0.8.3
+
+consul_is_server: false
+consul_is_ui: false
+consul_manage_service: true
+
+consul_logfile_dir: /var/log/consul
+
+consul_dns_config: false
+consul_dns_allow_stale: false
+consul_dns_max_stale: 5s
+consul_dns_node_ttl: 0s
+consul_dns_service_ttl: 0s
+consul_dns_enable_truncate: false
+consul_dns_only_passing: false
+consul_recursors: []
+
+consul_dnsmasq_upstream_template: "resolv_dnsmasq.conf.j2"
+consul_kv_template: "consulkv.j2"
+consul_add_path_template: "consul.sh.j2"
+
+consul_gossip_encrypt: "philphilphilphilphilph=="
+
+consul_binary: consul
+consul_user: consul
+consul_group: consul
+
+consul_htpasswd_file_path: "/opt/consul/htpasswd.consul"
+consul_htpasswd_user: basic-auth-user
+consul_htpasswd_pass: "iOSISDOFIOFH09345kjSDFKLJSFGDLjkh093245"
+
+consul_domain: consul.
+
+consul_group_name: consul_servers
+
+#consul_servers: [] # ['127.0.0.1']
+consul_log_level: "INFO"
+consul_rejoin_after_leave: true
+consul_leave_on_terminate: false
+
+consul_join_at_start: false
+consul_retry_join: true
+consul_retry_interval: 30s
+consul_retry_max: 0
+
+consul_servers_wan: []
+consul_join_wan: false
+consul_retry_join_wan: false
+consul_retry_interval_wan: 30s
+consul_retry_max_wan: 0
+consul_advertise_address_wan: false
+
+consul_iface: "eth0"
+consul_rpc_address: ""
+consul_bind_address: "{{ hostvars[inventory_hostname]['ansible_'+consul_iface]['ipv4']['address'] }}"
+consul_advertise_address: "{{ hostvars[inventory_hostname]['ansible_'+consul_iface]['ipv4']['address'] }}"
+consul_dynamic_bind: false
+consul_client_address: "127.0.0.1"
+
+consul_client_address_bind: false
+consul_datacenter: "default"
+
+consul_port_dns: 8600
+consul_port_http: 8500
+consul_port_https: -1
+consul_port_rpc: 8400
+consul_port_serf_lan: 8301
+consul_port_serf_wan: 8302
+consul_port_server: 8300
+consul_install_dnsmasq: false
+consul_dnsmasq:
+  listen_interface:
+    - lo
+    - docker0
+    - eth0
+  no_dhcp_interface:
+    - lo
+    - docker0
+    - eth0
+  upstream_servers:
+    - 8.8.8.8
+    - 8.8.4.4
+consul_node_name: "{{ inventory_hostname }}"
+
+# Set to true to enable hostname verification via TLS
+consul_verify_server_hostname: false
+
+consul_use_acls: false
+consul_acl_datacenter: "{{ consul_datacenter }}"
+consul_acl_default_policy: "allow"
+consul_acl_down_policy: "allow"
+consul_acl_master_token: "78ab5382-6bc9-4bc6-857f-d65f72fe3453"
+consul_acl_token:
+consul_acl_ttl: "30s"
+...

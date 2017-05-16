@@ -1,0 +1,28 @@
+---
+- name: Restart consul
+  become: true
+  become_method: sudo
+  service:
+    name: consul
+    state: restarted
+    enabled: yes
+
+- name: Reload consul config
+  become: true
+  become_method: sudo
+  command: pkill -1 consul
+  when: consul_service_state is not "stopped"
+
+- name: Reload systemd
+  become: true
+  become_method: sudo
+  command: systemctl daemon-reload
+
+- name: Restart dnsmasq
+  become: true
+  become_method: sudo
+  service:
+    name: dnsmasq
+    state: restarted
+    enabled: yes
+...

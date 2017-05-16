@@ -1,0 +1,10 @@
+"{{ consul_logfile_dir}}/consul.log" {
+    daily
+    rotate 7
+    create 640 {{ consul_user }} {{ consul_group }}
+    missingok
+    delaycompress
+    compress
+    notifempty
+    copytruncate
+}

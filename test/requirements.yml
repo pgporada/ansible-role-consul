@@ -1,0 +1,4 @@
+---
+- name: pgporada.repo-epel
+- name: pgporada.httpd
+...
